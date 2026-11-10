@@ -26,6 +26,8 @@ class DeviceStatus:
                                  # tray's input wake fires only for these - an icon
                                  # greyed because its device is off must not re-poll
                                  # the app on every keystroke (review, #202).
+    voltage_mv: Optional[int] = None  # battery voltage when the device reports it (Logitech
+                                      # 0x1001 / 0x1F20); used for battery health tracking
 
 
 class Provider:

@@ -4,6 +4,8 @@
   halo status [--json] show the latest reading of every device
   halo poll            poll once now, without the daemon, and print the result
   halo refresh         ask the running daemon to poll now
+  halo health [--json] battery health: cycles, runtime trend, expected life
+  halo tray            show tray icons (KDE / any StatusNotifierItem tray)
 """
 from __future__ import annotations
 
@@ -78,6 +80,52 @@ def cmd_refresh(args) -> int:
     return 0
 
 
+def _h(v, unit="", nd=1):
+    if v is None:
+        return "-"
+    return f"{v:.{nd}f}{unit}" if isinstance(v, float) else f"{v}{unit}"
+
+
+def cmd_health(args) -> int:
+    from . import health
+    reps = health.report(paths.SAMPLES_DB)
+    if args.json:
+        print(json.dumps([r.as_dict() for r in reps], indent=1))
+        return 0
+    if not reps:
+        print("No data yet. The daemon logs readings to " + paths.SAMPLES_DB)
+        return 0
+    for r in reps:
+        print(f"{r.name}  [{r.status}]")
+        print(f"  observed      {r.days_observed:g} days, {r.cycles:g} cycles"
+              + (f" ({r.cycles_per_day:g}/day)" if r.cycles_per_day else ""))
+        print(f"  discharges    {r.discharges} ({r.measured_discharges} measured), "
+              f"charges {r.charges}, deep {r.deep_discharges}")
+        print(f"  runtime       baseline {_h(r.baseline_runtime_h, ' h')}, "
+              f"now {_h(r.current_runtime_h, ' h')} per 100%")
+        print(f"  health        {_h(r.health_pct, '%')}"
+              + (f", fade {r.fade_per_cycle_h:+g} h/cycle" if r.fade_per_cycle_h is not None else ""))
+        if r.charge_rate_first or r.charge_rate_recent:
+            print(f"  charge rate   first {_h(r.charge_rate_first, '%/h')}, "
+                  f"recent {_h(r.charge_rate_recent, '%/h')}")
+        if r.full_mv_first:
+            print(f"  full voltage  first {r.full_mv_first} mV, recent {r.full_mv_recent} mV")
+        if r.days_to_80 is not None:
+            print(f"  to 80%        ~{r.days_to_80:g} days ({r.projection_basis})")
+        if r.hours_full_on_charger_per_week is not None:
+            print(f"  at 100% plugged  {r.hours_full_on_charger_per_week:g} h/week")
+        for a in r.advice:
+            print(f"  * {a}")
+        print()
+    print("Estimates; they firm up after a few weeks of normal use.")
+    return 0
+
+
+def cmd_tray(args) -> int:
+    from .tray import main as tray_main
+    return tray_main(dashboard=args.dashboard)
+
+
 def cmd_daemon(args) -> int:
     from .daemon import Daemon
     Daemon().run()
@@ -94,11 +142,15 @@ def main(argv=None) -> int:
     p.add_argument("--json", action="store_true")
     sub.add_parser("refresh", help="ask the daemon to poll now")
     sub.add_parser("daemon", help="run the poll loop")
+    h = sub.add_parser("health", help="battery health and expected life")
+    h.add_argument("--json", action="store_true")
+    t = sub.add_parser("tray", help="tray icons")
+    t.add_argument("--dashboard", action="store_true", help="also open the dashboard")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(levelname)s %(name)s: %(message)s")
     fn = {"status": cmd_status, "poll": cmd_poll, "refresh": cmd_refresh,
-          "daemon": cmd_daemon}.get(args.cmd or "status")
+          "daemon": cmd_daemon, "health": cmd_health, "tray": cmd_tray}.get(args.cmd or "status")
     return fn(args)
 
 

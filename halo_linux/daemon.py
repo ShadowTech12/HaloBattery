@@ -18,6 +18,7 @@ from halo import history
 from providers.base import DeviceStatus, Provider
 
 from . import paths
+from .config import DEFAULTS, load_config  # noqa: F401  (re-exported)
 from .samples import SampleLog
 
 log = logging.getLogger("halobattery")
@@ -25,30 +26,6 @@ log = logging.getLogger("halobattery")
 # Windows-only providers (WinRT Bluetooth, XInput, Windows.Gaming.Input). Bluetooth
 # devices on Linux will come from UPower instead.
 WINDOWS_ONLY = {"BluetoothProvider", "XInputProvider"}
-
-DEFAULTS = {
-    "interval": 60,          # s between polls
-    "low": 20,               # % at or below which a low-battery notification is sent
-    "notify": True,
-    "notify_full": True,     # tell when a charging device reaches 100 %
-    "disabled": [],          # provider class names to skip, e.g. ["RazerProvider"]
-    "miss_polls": 2,         # a device missing this many polls in a row is dropped
-}
-
-
-def load_config(path: str = paths.CONFIG_PATH) -> dict:
-    cfg = dict(DEFAULTS)
-    try:
-        with open(path, encoding="utf-8") as f:
-            user = json.load(f)
-        cfg.update({k: v for k, v in user.items() if k in DEFAULTS})
-    except FileNotFoundError:
-        pass
-    except (OSError, ValueError) as e:
-        log.warning("config %s ignored: %s", path, e)
-    cfg["interval"] = max(5, min(3600, int(cfg["interval"])))
-    return cfg
-
 
 def provider_classes(disabled=()) -> List[type]:
     out = []

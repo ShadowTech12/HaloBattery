@@ -156,6 +156,14 @@ def parse_battery(feature: int, p) -> Tuple[Optional[int], bool, str]:
     return None, False, ""
 
 
+def battery_mv(feature: int, p) -> Optional[int]:
+    """Battery voltage in mV from a 0x1001 / 0x1F20 reply, None for other features."""
+    if feature not in (F_VOLTAGE, F_ADC) or p is None or len(p) < 2:
+        return None
+    mv = (p[0] << 8) | p[1]
+    return mv if mv >= 2500 else None
+
+
 def parse_register_battery(reg: int, p) -> Tuple[Optional[int], bool, str]:
     """(level, charging, approximate text) from a HID++ 1.0 battery register.
 
@@ -404,7 +412,7 @@ class LogitechProvider(Provider):
                     self._last.pop(old, None)
                 self._slot_key[slot] = key
                 return DeviceStatus(key, name, level, chg, True, "logitech", approx=approx,
-                                    kind=kind)
+                                    kind=kind, voltage_mv=battery_mv(feature, r))
         # nothing from the 2.0 features: an older device may answer its
         # registers instead (it has no feature table at all)
         st = self._register_battery(ch, slot, pid, idx, instance, multi)
