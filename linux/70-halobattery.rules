@@ -1,0 +1,6 @@
+# Halo Battery: let the logged-in user read battery reports from headset/receiver hidraw nodes.
+# Install: sudo install -m644 linux/70-halobattery.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+# Audeze (Maxwell dongle / headset)
+KERNEL=="hidraw*", ATTRS{idVendor}=="3329", TAG+="uaccess"
+# Logitech receivers (Bolt, Unifying, Lightspeed)
+KERNEL=="hidraw*", ATTRS{idVendor}=="046d", TAG+="uaccess"

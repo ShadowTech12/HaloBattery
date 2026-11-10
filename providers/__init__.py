@@ -1,3 +1,16 @@
+import sys as _sys
+
+# On Linux, hidapi's "hid" module uses the libusb backend, which detaches kernel drivers
+# (a keyboard on that receiver would stop typing). Use the hidraw backend instead, which
+# talks to /dev/hidraw* alongside the kernel driver. Every provider does "import hid", so
+# aliasing it here covers them all.
+if _sys.platform.startswith("linux"):
+    try:
+        import hidraw as _hidraw
+        _sys.modules["hid"] = _hidraw
+    except ImportError:  # pragma: no cover
+        pass
+
 from .base import DeviceStatus, Provider  # noqa: F401
 from .barracuda import BarracudaProvider  # noqa: F401
 from .audeze import AudezeProvider  # noqa: F401

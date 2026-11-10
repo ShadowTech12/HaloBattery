@@ -91,6 +91,7 @@ HID" - poll() uses that to tell a switched-off headset from a live one.
 """
 from __future__ import annotations
 
+import sys
 import time
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -255,7 +256,14 @@ NO_HEADSET_STRING = "audeze maxwell dongle"
 
 
 def no_headset_linked(ifaces) -> bool:
-    """True when the dongle itself says no headset is linked (switched off)."""
+    """True when the dongle itself says no headset is linked (switched off).
+
+    Only Windows refreshes the product string when the headset links. On Linux it comes
+    from the USB string descriptor read at enumeration and always says "Dongle", so it
+    tells nothing there: always attempt the read.
+    """
+    if sys.platform.startswith("linux"):
+        return False
     return any((d.get("product_string") or "").strip().lower() == NO_HEADSET_STRING
                for d in ifaces)
 

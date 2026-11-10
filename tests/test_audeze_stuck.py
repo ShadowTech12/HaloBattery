@@ -98,6 +98,7 @@ class StuckDongleTests(unittest.TestCase):
         self.dongle.stuck = True
         self.assertEqual(self.p.poll(), [])
 
+    @mock.patch.object(audeze.sys, "platform", "win32")  # the product string only goes live on Windows
     def test_switched_off_headset_is_not_called_stuck(self):
         self.infos = ifaces("Audeze Maxwell Dongle", pid=0x4B19)
         self.p.poll()
