@@ -2,78 +2,183 @@
 
 <img src="docs/logo.png" alt="" width="96">
 
-# Halo Battery
+# Halo Battery for Linux
 
-**Battery levels of your wireless mouse, keyboard, headset and controller, right in the Windows tray.**<br>
-One icon per device. No vendor software.
+**Battery levels and battery health of your wireless mouse, keyboard and headset, in the KDE Plasma tray.**<br>
+One icon per device. No vendor software. Tracks charge cycles and battery wear over time.
 
-[![Latest release](https://img.shields.io/github/v/release/HeyOkay/HaloBattery?label=release&color=2ea043)](../../releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/HeyOkay/HaloBattery/total?color=2ea043)](../../releases)
-[![Windows 10 / 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)](#install)
-[![License: MIT](https://img.shields.io/github/license/HeyOkay/HaloBattery?color=lightgrey)](LICENSE)
-
-### [⬇ Download the latest version](../../releases/latest)
-
-<img src="docs/icons.png" alt="Every icon state: headset, mouse, keyboard, controllers and Bluetooth at 100 % down to 15 %, charging and asleep" width="560">
+[![Linux](https://img.shields.io/badge/Linux-KDE%20Plasma%206-1d99f3)](#install)
+[![Upstream](https://img.shields.io/badge/fork%20of-HeyOkay%2FHaloBattery-lightgrey)](https://github.com/HeyOkay/HaloBattery)
+[![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
 </div>
 
+This is a Linux port of [**HeyOkay/HaloBattery**](https://github.com/HeyOkay/HaloBattery), a Windows tray app that reads battery levels straight from the receivers of 30+ brands. The device protocols (the `providers/` folder) are the upstream work. This fork adds a Linux daemon, a CLI, a Qt tray for KDE Plasma and battery health analysis.
+
+**On Windows?** Use the [upstream releases](https://github.com/HeyOkay/HaloBattery/releases/latest). The Windows app (`halo_battery.pyw`) is still in this repository, unchanged.
+
 ## Features
 
-- **One glance.** A ring for each device fills with its level, turns amber near your alert level and red below it, and breathes green while charging.
-- **No vendor apps.** Close Synapse, G HUB, NGENUITY and the rest: Halo Battery talks to the receiver, the cable or Windows Bluetooth itself.
-- **30+ brands.** Razer, Logitech, SteelSeries, HyperX, Corsair, ASUS ROG, Sony, Xbox, Nintendo, 8BitDo, Pulsar, Keychron and [many more](docs/devices.md).
-- **Stays out of the way.** Alerts wait until your full-screen game closes, and devices are polled less often while you play.
-- **Native look.** A Windows 11 style menu, sharp at any display scale, light or dark.
-- **Autoupdates.** A new release installs from the tray menu in one click.
+- **Tray icons.** A ring for each device fills with its level. It turns amber near your alert level and red below it, breathes green while charging and greys out while the device sleeps. Hover for level, time left and health. Click for the dashboard.
+- **Notifications.** Low battery (once per discharge) and "fully charged, you can unplug it", through the desktop notification service.
+- **Time left.** Hours of *use* left, measured from how fast the device actually drains. Sleep and switched-off time are not counted.
+- **Battery health.** Every reading goes into a local SQLite log. From that log Halo Battery works out:
+  - equivalent charge cycles, and cycles per day
+  - runtime per full charge, compared with the first discharges it measured (health %)
+  - runtime lost per cycle, and roughly how many days until the battery reaches 80 % of its original runtime
+  - charge speed, and full-charge voltage for devices that report voltage (e.g. Logitech G915)
+  - charging habits: hours a week left on the charger at 100 %, and how many deep discharges
+- **Dashboard.** A 7-day level chart and the health figures for each device.
+- **CLI.** `halo status`, `halo health`, both with `--json` for scripts and status bars.
+- **Safe on the receiver.** Reads through `/dev/hidraw` alongside the kernel driver, so your keyboard and mouse keep working, and it runs alongside Solaar.
 
-<p align="center"><img src="docs/charging.gif" alt="The charging animation: the green arc slowly breathes" width="300"></p>
+## Tested hardware
+
+| Device | Connection | Level | Voltage |
+|---|---|---|---|
+| Logitech MX Master 3S | Logi Bolt receiver | ✅ | – |
+| Logitech G915 | Lightspeed receiver | ✅ | ✅ |
+| Audeze Maxwell | USB dongle | ✅ | – |
+| Xbox controller | Bluetooth | 🚧 planned (UPower) | – |
+
+Other devices from the [upstream list](docs/devices.md) that use a USB receiver or cable *should* work, because their providers only use hidapi. They are untested on Linux. Bluetooth devices are not read yet: upstream's Bluetooth code is Windows-only.
+
+Tested on Arch Linux with KDE Plasma 6.6 (Wayland). The tray uses StatusNotifierItem, so other trays that support it (GNOME with the AppIndicator extension, waybar, etc.) should work too.
 
 ## Install
 
-1. Download `HaloBattery-<version>.zip` from the **[latest release](../../releases/latest)**.
-2. Extract it to a folder of its own, e.g. `C:\Tools`, and run `HaloBattery\HaloBattery.exe`. Keep the folder together: the .exe needs the `_internal` folder next to it.
-3. Right-click a tray icon → **Start with Windows**.
+You need Python 3.10+, [uv](https://github.com/astral-sh/uv) (or plain `venv` + `pip`), and `notify-send` (package `libnotify`) for notifications.
 
-Windows SmartScreen may warn about an unrecognized app, because the file is not code-signed: **More info → Run anyway**. The release is built by GitHub Actions straight from this repository, with public build logs.
+```bash
+git clone https://github.com/ShadowTech12/HaloBattery.git
+cd HaloBattery
+git checkout linux-port
 
-Right-click any icon to rename the device, hide it, set its alert level, change the preferences or take a diagnostics report. **[All features and settings →](docs/features.md)** (also: portable mode, running from source)
+# 1. Python environment (uv brings its own Python; the system Python is not touched)
+uv venv --python 3.13 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
 
-## Supported devices
+# 2. Let your user read the receivers and headset (hidraw access for the seat user)
+sudo install -m644 linux/70-halobattery.rules /etc/udev/rules.d/
+sudo udevadm control --reload
+sudo udevadm trigger --action=add --subsystem-match=hidraw && sudo udevadm settle
 
-Mice, keyboards, headsets and controllers over a 2.4 GHz receiver, a USB cable or Bluetooth.
-**[See the full list →](docs/devices.md)** It shows the connection and whether each device has been tested on real hardware.
+# 3. Install and start the systemd user services (daemon + tray) and the `halo` command
+linux/install.sh
+```
 
-## Add your device
+`linux/install.sh` runs the app from the folder you cloned. After you `git pull`, run it again to restart the services. Options:
 
-Is your device not detected, or does it show a wrong level? Send a diagnostics report. It takes about a minute:
+- `linux/install.sh --no-tray`: the daemon only, no tray icons (useful for headless setups or status bars).
+- `linux/install.sh --remove`: stop and remove the services and the `halo` command.
 
-1. Close the maker's software (Synapse, G HUB, the web driver and similar) and wake the device up (move the mouse, press a key).
-2. Right-click a Halo Battery icon and select **Diagnostics…**. The "No devices found" icon has this item too.
+The udev rule is not removed by `--remove`. To remove it: `sudo rm /etc/udev/rules.d/70-halobattery.rules`.
 
-   <picture>
-     <source media="(prefers-color-scheme: dark)" srcset="docs/contributing/diagnostics-menu-dark.png">
-     <img src="docs/contributing/diagnostics-menu-light.png" alt="The tray menu of a device, with the Diagnostics item marked" width="381">
-   </picture>
+`70-halobattery.rules` grants access to Logitech (`046d`) and Audeze (`3329`) devices. For another brand, add a line with its USB vendor id (find it with `lsusb`).
 
-3. The report `diagnostics.txt` opens in Notepad. [Open an issue](../../issues/new?template=device.yml), write the device name and how it is connected (receiver, cable or Bluetooth), and drag the file into the comment box. The file is in `%APPDATA%\HaloBattery`.
+## Usage
 
-The report contains Bluetooth MAC addresses and device serial numbers. You can replace them with `xx` before you post. [CONTRIBUTING.md](.github/CONTRIBUTING.md) explains the report, how to record a USB capture of the maker's app, and how to open a pull request.
+```
+halo status [--json]   latest reading of every device (from the daemon)
+halo health [--json]   battery health, cycles, runtime trend, expected life
+halo poll [-v]         poll once now without the daemon; -v prints provider diagnostics
+halo refresh           ask the running daemon to poll now
+halo tray [--dashboard]  run the tray (what halobattery-tray.service runs)
+halo daemon            run the poll loop (what halobattery.service runs)
+```
 
-<details>
-<summary><b>Troubleshooting</b></summary>
+```
+$ halo status
+DEVICE                                        LEVEL  STATE       LEFT  DRAIN
+Audeze Maxwell                                96%    on battery
+G915 WIRELESS RGB MECHANICAL GAMING KEYBOARD  75%    charging
+MX Master 3S                                  50%    on battery
+```
 
-1. Close Synapse, the WLmouse web driver and other battery tools: they may hold the receiver.
-2. Wake the mouse up by moving it.
-3. Choose **Diagnostics…** from the tray menu and send the report as [Add your device](#add-your-device) tells you.
-4. **"python312.dll was not found"**, or **Start with Windows** says the app runs from a temporary folder: the app was started straight from the ZIP, or only `HaloBattery.exe` was copied out of it. Extract the whole ZIP to a folder of its own and run `HaloBattery.exe` from there.
+LEFT and DRAIN fill in after about 30 minutes of use and a 3 % drop since the last charge.
 
-Settings, the log and the diagnostics report live in `%APPDATA%\HaloBattery` (in the app's own folder in [portable mode](docs/features.md#portable-mode)). The first line of the diagnostics report shows which folder is used.
+Services and logs:
 
-</details>
+```bash
+systemctl --user status halobattery halobattery-tray
+journalctl --user -u halobattery -u halobattery-tray -f
+```
+
+## Configuration
+
+Optional. Put it in `~/.config/halobattery/config.json`, then run `systemctl --user restart halobattery halobattery-tray`.
+
+```json
+{
+  "interval": 60,
+  "low": 20,
+  "notify": true,
+  "notify_full": true,
+  "disabled": [],
+  "miss_polls": 2
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `interval` | seconds between polls (5–3600) |
+| `low` | % at or below which the low-battery notification fires and the ring turns red |
+| `notify` / `notify_full` | low-battery / fully-charged notifications |
+| `disabled` | provider class names to skip, e.g. `["RazerProvider"]` (see `providers/__init__.py`) |
+| `miss_polls` | polls a device may be missing before its icon is removed |
+
+## How battery health is estimated
+
+Devices report a percentage of their *current* capacity, so a worn battery still says 100 % when full. Wear shows up in other ways, and Halo Battery looks for them:
+
+1. **Runtime per charge.** For each discharge, Halo Battery fits a line through the level against *time in use*. Time asleep, time switched off and gaps while the PC sleeps are left out. From that line it gets hours per 100 %. The median of the first 3 measured discharges is the baseline. The median of the last 3 is "now". **Health % = now / baseline.**
+2. **Fade per cycle.** It fits a line through runtime against equivalent cycles (total % discharged ÷ 100). With the cycles you use per day, that gives the days until runtime drops to 80 % of the baseline. Until a fade can be measured, the projection assumes a typical Li-ion life of about 500 cycles to 80 %.
+3. **Charge rate.** A smaller battery fills faster, so a rising %/h while charging means wear. The rate is measured below 95 %, because the slow top-off at the end would hide the trend.
+4. **Full-charge voltage** for devices that report millivolts (Logitech HID++ feature 0x1001).
+
+Status: **learning** (fewer than 4 measured discharges), **good** (≥ 90 %), **fair** (80–90 %), **worn** (< 80 %).
+
+**Limits.** These are estimates. How hard you use a device changes how fast it drains: headset volume and ANC, keyboard backlight, mouse polling rate. Rolling medians smooth this out, but not completely. A discharge is measured only once it has covered at least 8 points and 30 minutes of use. Expect the numbers to mean something after a few weeks of normal use. The baseline is the battery *when Halo Battery first saw it*, not when it was new.
+
+## Files
+
+| Path | Contents |
+|---|---|
+| `~/.local/share/halobattery/samples.db` | every reading (SQLite, ~1–2 MB per device-year): the health history |
+| `~/.local/share/halobattery/history.json` | the current discharge, for "time left" |
+| `~/.config/halobattery/config.json` | settings |
+| `$XDG_RUNTIME_DIR/halobattery/state.json` | the latest poll, read by the CLI and the tray |
+| `~/.config/systemd/user/halobattery{,-tray}.service` | the services written by `install.sh` |
+
+Delete `samples.db` to start the health history over, e.g. after replacing a battery.
+
+## Troubleshooting
+
+- **A device is missing.** Run `halo poll -v`. If the provider says it could not open the device, check the permissions with `ls -l /dev/hidraw*`. Your devices should show a `+` (ACL) after the mode. If they don't, install the udev rule and run the `udevadm trigger` line from [Install](#install) again.
+- **Audeze shows no level.** The headset must be on and linked to the dongle. On Linux the dongle always calls itself "Audeze Maxwell Dongle", so Halo Battery tries a read on every poll. While the headset is off, each poll takes about 1.5 s longer.
+- **Keyboard or mouse stopped working while testing your own scripts.** You used hidapi's libusb backend (`import hid` on Linux), which detaches the kernel driver. Unplug and replug the receiver. Halo Battery uses the `hidraw` backend (`providers/__init__.py`) to avoid exactly this.
+- **No tray icons.** Check that your tray supports StatusNotifierItem and that the service is running: `systemctl --user status halobattery-tray`.
+- **"GLIBC_2.xx not found" when creating the venv.** Your system Python is newer than your glibc (a partial upgrade). `uv venv --python 3.13` uses uv's own Python and avoids it.
+
+## Development
+
+```bash
+.venv/bin/python -m pytest -q --continue-on-collection-errors tests
+```
+
+The Linux code lives in `halo_linux/` (daemon, CLI, health, tray) and `linux/` (udev rule, installer). Tests for it are in `tests/test_linux_halo.py`. Some upstream tests cover the Windows tray, Bluetooth and XInput. On Linux, 13 of them can't load and 3 fail.
+
+To add a device, follow upstream's [CONTRIBUTING.md](.github/CONTRIBUTING.md). New protocol support belongs upstream, so both platforms get it. Linux-specific fixes belong here.
+
+### Roadmap
+
+- [ ] Bluetooth devices through UPower / BlueZ (Xbox controller first)
+- [ ] Test more receivers on Linux and widen the udev rule
+- [ ] AUR package (`PKGBUILD`)
+- [ ] Waybar / Polybar output module
 
 ## Credits
 
-Device protocols come from OpenRazer, HeadsetControl, Solaar, rivalcfg, G-Helper and other open projects, and from captures and test runs sent by the community. **[Full credits →](docs/credits.md)**
+All device protocols come from [HeyOkay/HaloBattery](https://github.com/HeyOkay/HaloBattery). Upstream got them from OpenRazer, HeadsetControl, Solaar, rivalcfg, G-Helper and other open projects, and from captures and test runs sent by its community. **[Full credits →](docs/credits.md)**
 
-MIT licensed, see [LICENSE](LICENSE).
+MIT licensed, see [LICENSE](LICENSE). The original copyright is kept.
