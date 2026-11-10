@@ -65,6 +65,9 @@ class Daemon:
         self.misses: Dict[str, int] = {}
         self.alerted_low: Dict[str, bool] = {}
         self.alerted_full: Dict[str, bool] = {}
+        # last level read off the charger, per device: what a voltage-based device
+        # shows while charging (its voltage reads high there)
+        self.rest_level: Dict[str, int] = self.samples.last_resting_levels()
         self.stop = threading.Event()
         self.wake = threading.Event()
 
@@ -87,12 +90,13 @@ class Daemon:
     def tick(self) -> None:
         now = time.time()
         seen = set()
-        for st in self.poll_all():
+        for raw in self.poll_all():
+            st = self.displayed(raw)
             seen.add(st.key)
             self.misses.pop(st.key, None)
             self.history.record(st.key, st.level, st.charging, st.online, now,
                                 coarse=bool(st.approx))
-            self.samples.record(st, now)
+            self.samples.record(raw, now)      # the raw reading: health.py sorts it out
             left = self.history.seconds_left(st.key, st.level)
             entry = dataclasses.asdict(st)
             entry.update(seen=now, seconds_left=left,
@@ -110,6 +114,22 @@ class Daemon:
         self.samples.commit()
         self.history.save()
         self.write_state(now)
+
+    def displayed(self, st: DeviceStatus) -> DeviceStatus:
+        """What to show for a reading. A level read off a voltage curve is too high
+        while charging, so it is replaced by the last level read off the charger, or
+        by 100 % once the device itself says the charge is complete."""
+        if not st.level_from_voltage or st.level is None:
+            return st
+        if not st.charging:
+            if st.online:
+                self.rest_level[st.key] = st.level
+            return st
+        if st.charge_full:
+            return dataclasses.replace(st, level=100, approx="")
+        held = self.rest_level.get(st.key)
+        text = f"charging (from {held}%)" if held is not None else "charging"
+        return dataclasses.replace(st, level=held, approx=text)
 
     def _rate(self, key: str) -> Optional[float]:
         r = self.history.rate(key)          # % per second of use, or None

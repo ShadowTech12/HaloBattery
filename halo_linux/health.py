@@ -5,7 +5,14 @@ still reads 100 % when full. Wear shows up instead as:
 
   * shorter runtime: hours of use per 100 % of charge, measured over each discharge;
   * faster charging: % per hour while on the charger rises as there is less to fill;
-  * for devices that report voltage (Logitech 0x1001), a lower voltage when full.
+  * for devices that report voltage (Logitech 0x1001), a lower resting voltage after a
+    full charge.
+
+Devices that report voltage get their level from a voltage curve, and on the charger
+the charging current lifts the voltage, so the level reads high (20 points is common).
+Their charging readings are therefore left out of the charge rate, the step down on
+unplugging is not counted as a discharge, and the first SETTLE_S after unplugging are
+skipped while the voltage settles.
 
 From the log this module derives, per device:
 
@@ -40,6 +47,7 @@ RECENT_SESSIONS = 3        # the last N give the current runtime
 MIN_SESSIONS_FOR_HEALTH = BASELINE_SESSIONS + 1
 TYPICAL_CYCLES = 500       # equivalent cycles to ~80 % for a typical Li-ion cell
 END_OF_LIFE = 0.80         # runtime fraction of baseline taken as "worn"
+SETTLE_S = 600.0           # s after unplugging a voltage-based device left out (settling)
 DEEP_DISCHARGE = 5         # % at or below which a discharge counts as deep
 DAY = 86400.0
 
@@ -69,10 +77,10 @@ class Discharge:
 class Charge:
     start: float
     end: float
-    start_level: int
-    end_level: int
-    rate_per_h: Optional[float] = None   # % per hour
-    full_mv: Optional[int] = None        # highest voltage seen while charging
+    start_level: Optional[int]           # last level before the charger, None if unknown
+    end_level: Optional[int]             # None for voltage-based devices (reads high)
+    rate_per_h: Optional[float] = None   # % per hour; None for voltage-based devices
+    full_mv: Optional[int] = None        # resting voltage SETTLE_S after a full charge
 
 
 @dataclass
@@ -148,11 +156,15 @@ def split_sessions(rows: List[Row]) -> Tuple[List[Discharge], List[Charge], floa
             discharges.append(d)
         cur_d = None
 
+    pending_full: Optional[Charge] = None   # a full charge waiting for its rested voltage
+    settle_until = 0.0
+    was_charging = False
+
     def close_c():
-        nonlocal cur_c
-        if cur_c and len(cur_c["pts"]) >= 2:
+        nonlocal cur_c, pending_full, settle_until
+        if cur_c:
             pts = cur_c["pts"]
-            c = Charge(pts[0][0], pts[-1][0], pts[0][1], pts[-1][1], full_mv=cur_c["mv"])
+            c = Charge(cur_c["t0"], cur_c["t1"], cur_c["start"], pts[-1][1] if pts else None)
             # the rate comes from the part below 95 %: the last few % are a slow
             # constant-voltage top-off that would hide the trend
             body = [p for p in pts if p[1] < 95]
@@ -161,6 +173,10 @@ def split_sessions(rows: List[Row]) -> Tuple[List[Discharge], List[Charge], floa
                 if s and s > 0:
                     c.rate_per_h = round(s * 3600.0, 1)
             charges.append(c)
+            if cur_c["vb"]:
+                settle_until = cur_c["t1"] + SETTLE_S
+                if cur_c["last_raw"] >= 99:
+                    pending_full = c
         cur_c = None
 
     for i, r in enumerate(rows):
@@ -168,26 +184,41 @@ def split_sessions(rows: List[Row]) -> Tuple[List[Discharge], List[Charge], floa
         dt = min(max(nxt - r.ts, 0.0), MAX_GAP)
         if r.level is None:
             continue
+        # a level with a voltage beside it was read off a voltage curve (Logitech
+        # 0x1001): on the charger it reads high, so it says nothing about the charge
+        vb = r.voltage_mv is not None
         if r.charging:
             close_d()
             if cur_c is None:
-                cur_c = {"pts": [], "mv": None}
-            cur_c["pts"].append((r.ts, r.level))
-            if r.voltage_mv:
-                cur_c["mv"] = max(cur_c["mv"] or 0, r.voltage_mv)
+                cur_c = {"pts": [], "t0": r.ts, "start": prev_level, "vb": False}
+            cur_c["t1"] = r.ts
+            cur_c["last_raw"] = r.level
+            cur_c["vb"] = cur_c["vb"] or vb
+            if not vb:
+                cur_c["pts"].append((r.ts, r.level))
             if r.level >= 100:
                 full_on_charger += dt
-        else:
+            pending_full = None
+            prev_level = None      # the step on unplugging is not a discharge
+            was_charging = True
+            continue
+        if was_charging:
             close_c()
-            if prev_level is not None and r.level >= prev_level + RESET_RISE:
-                close_d()            # charged while we were not looking
-            if prev_level is not None and r.level < prev_level and not r.coarse:
-                dropped += prev_level - r.level
-            if r.online:
-                if cur_d is None:
-                    cur_d = {"pts": [], "use": 0.0}
-                cur_d["pts"].append((cur_d["use"], r.ts, r.level))
-                cur_d["use"] += dt
+            was_charging = False
+        if vb and r.ts < settle_until:
+            continue               # voltage still settling after the charger came off
+        if pending_full is not None and r.voltage_mv:
+            pending_full.full_mv = r.voltage_mv
+            pending_full = None
+        if prev_level is not None and r.level >= prev_level + RESET_RISE:
+            close_d()              # charged while we were not looking
+        if prev_level is not None and r.level < prev_level and not r.coarse:
+            dropped += prev_level - r.level
+        if r.online:
+            if cur_d is None:
+                cur_d = {"pts": [], "use": 0.0}
+            cur_d["pts"].append((cur_d["use"], r.ts, r.level))
+            cur_d["use"] += dt
         prev_level = r.level
     close_d()
     close_c()
@@ -305,14 +336,29 @@ def report(db_path: str) -> List[Health]:
 
 
 def levels_since(db_path: str, key: str, since: float) -> List[Tuple[float, int, bool]]:
-    """(ts, level, charging) of one device since `since`, for charts."""
+    """(ts, level, charging) of one device since `since`, for charts. While a
+    voltage-based device charges its reading is too high; the last level before the
+    charger is repeated instead, as the tray shows it."""
     try:
         db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
-            return [(ts, lv, bool(c)) for ts, lv, c in db.execute(
-                "SELECT ts, level, charging FROM samples WHERE key=? AND ts>=? "
-                "AND level IS NOT NULL ORDER BY ts", (key, since))]
+            cols = {r[1] for r in db.execute("PRAGMA table_info(samples)")}
+            mv = "voltage_mv" if "voltage_mv" in cols else "NULL"
+            rows = db.execute(
+                f"SELECT ts, level, charging, {mv} FROM samples WHERE key=? AND ts>=? "
+                "AND level IS NOT NULL ORDER BY ts", (key, since)).fetchall()
         finally:
             db.close()
     except sqlite3.OperationalError:
         return []
+    out: List[Tuple[float, int, bool]] = []
+    held: Optional[int] = None
+    for ts, lv, c, volt in rows:
+        if c and volt is not None:
+            if held is None:
+                continue           # nothing to show until a real reading
+            lv = held
+        elif not c:
+            held = lv
+        out.append((ts, lv, bool(c)))
+    return out

@@ -26,7 +26,7 @@ This is a Linux port of [**HeyOkay/HaloBattery**](https://github.com/HeyOkay/Hal
   - equivalent charge cycles, and cycles per day
   - runtime per full charge, compared with the first discharges it measured (health %)
   - runtime lost per cycle, and roughly how many days until the battery reaches 80 % of its original runtime
-  - charge speed, and full-charge voltage for devices that report voltage (e.g. Logitech G915)
+  - charge speed, and resting voltage after a full charge for devices that report voltage (e.g. Logitech G915)
   - charging habits: hours a week left on the charger at 100 %, and how many deep discharges
 - **Dashboard.** A 7-day level chart and the health figures for each device.
 - **CLI.** `halo status`, `halo health`, both with `--json` for scripts and status bars.
@@ -134,7 +134,9 @@ Devices report a percentage of their *current* capacity, so a worn battery still
 1. **Runtime per charge.** For each discharge, Halo Battery fits a line through the level against *time in use*. Time asleep, time switched off and gaps while the PC sleeps are left out. From that line it gets hours per 100 %. The median of the first 3 measured discharges is the baseline. The median of the last 3 is "now". **Health % = now / baseline.**
 2. **Fade per cycle.** It fits a line through runtime against equivalent cycles (total % discharged ÷ 100). With the cycles you use per day, that gives the days until runtime drops to 80 % of the baseline. Until a fade can be measured, the projection assumes a typical Li-ion life of about 500 cycles to 80 %.
 3. **Charge rate.** A smaller battery fills faster, so a rising %/h while charging means wear. The rate is measured below 95 %, because the slow top-off at the end would hide the trend.
-4. **Full-charge voltage** for devices that report millivolts (Logitech HID++ feature 0x1001).
+4. **Resting voltage after a full charge**, for devices that report millivolts (Logitech HID++ feature 0x1001), read 10 minutes after unplugging.
+
+**Devices that report voltage** (G915 and other Logitech devices with feature 0x1001) have no percentage of their own: Halo Battery reads the level off a voltage curve. On the charger the charging current lifts the voltage, so the curve reads about 20 points high. While such a device charges, Halo Battery shows **"charging (from 56%)"**: the last level it read before you plugged in. It switches to 100 % only when the device itself reports the charge complete. These charging readings are left out of the health figures, as is the drop when you unplug and the next 10 minutes while the voltage settles.
 
 Status: **learning** (fewer than 4 measured discharges), **good** (≥ 90 %), **fair** (80–90 %), **worn** (< 80 %).
 
@@ -155,6 +157,7 @@ Delete `samples.db` to start the health history over, e.g. after replacing a bat
 ## Troubleshooting
 
 - **A device is missing.** Run `halo poll -v`. If the provider says it could not open the device, check the permissions with `ls -l /dev/hidraw*`. Your devices should show a `+` (ACL) after the mode. If they don't, install the udev rule and run the `udevadm trigger` line from [Install](#install) again.
+- **The level jumps up when plugged in and drops when unplugged.** That's a device that reports voltage (see [How battery health is estimated](#how-battery-health-is-estimated)). Halo Battery shows "charging (from N%)" for these, so if you still see a jump, run `halo poll -v` and open an issue with the output.
 - **Audeze shows no level.** The headset must be on and linked to the dongle. On Linux the dongle always calls itself "Audeze Maxwell Dongle", so Halo Battery tries a read on every poll. While the headset is off, each poll takes about 1.5 s longer.
 - **Keyboard or mouse stopped working while testing your own scripts.** You used hidapi's libusb backend (`import hid` on Linux), which detaches the kernel driver. Unplug and replug the receiver. Halo Battery uses the `hidraw` backend (`providers/__init__.py`) to avoid exactly this.
 - **No tray icons.** Check that your tray supports StatusNotifierItem and that the service is running: `systemctl --user status halobattery-tray`.

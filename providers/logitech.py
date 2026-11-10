@@ -164,6 +164,12 @@ def battery_mv(feature: int, p) -> Optional[int]:
     return mv if mv >= 2500 else None
 
 
+def battery_full(feature: int, p) -> bool:
+    """0x1001 on external power with charge status 1 (end of charge), as Solaar decodes it."""
+    return (feature == F_VOLTAGE and p is not None and len(p) >= 3
+            and bool(p[2] & 0x80) and p[2] & 0x03 == 0x01)
+
+
 def parse_register_battery(reg: int, p) -> Tuple[Optional[int], bool, str]:
     """(level, charging, approximate text) from a HID++ 1.0 battery register.
 
@@ -412,7 +418,9 @@ class LogitechProvider(Provider):
                     self._last.pop(old, None)
                 self._slot_key[slot] = key
                 return DeviceStatus(key, name, level, chg, True, "logitech", approx=approx,
-                                    kind=kind, voltage_mv=battery_mv(feature, r))
+                                    kind=kind, voltage_mv=battery_mv(feature, r),
+                                    level_from_voltage=feature in (F_VOLTAGE, F_ADC),
+                                    charge_full=battery_full(feature, r))
         # nothing from the 2.0 features: an older device may answer its
         # registers instead (it has no feature table at all)
         st = self._register_battery(ch, slot, pid, idx, instance, multi)

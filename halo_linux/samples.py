@@ -57,6 +57,13 @@ class SampleLog:
         self._last[st.key] = (sig, now)
         return True
 
+    def last_resting_levels(self) -> Dict[str, int]:
+        """key -> the level of the newest reading taken off the charger."""
+        q = ("SELECT key, level FROM samples AS s WHERE charging = 0 AND online = 1 "
+             "AND level IS NOT NULL AND ts = (SELECT MAX(ts) FROM samples WHERE key = s.key "
+             "AND charging = 0 AND online = 1 AND level IS NOT NULL)")
+        return {k: lv for k, lv in self.db.execute(q)}
+
     def commit(self) -> None:
         self.db.commit()
 

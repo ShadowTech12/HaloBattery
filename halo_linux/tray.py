@@ -95,6 +95,8 @@ def draw_icon(level: Optional[int], kind: str, online: bool, charging: bool, low
 
 
 def describe(d: dict) -> str:
+    if d.get("approx", "").startswith("charging"):
+        return d["approx"]            # "charging (from 56%)": a voltage-based device
     if d.get("approx"):
         lvl = d["approx"]
     elif d.get("level") is not None:

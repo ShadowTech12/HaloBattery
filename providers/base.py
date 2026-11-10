@@ -28,6 +28,9 @@ class DeviceStatus:
                                  # the app on every keystroke (review, #202).
     voltage_mv: Optional[int] = None  # battery voltage when the device reports it (Logitech
                                       # 0x1001 / 0x1F20); used for battery health tracking
+    level_from_voltage: bool = False  # level is read off a voltage curve: it reads high on
+                                      # the charger (charging current lifts the voltage)
+    charge_full: bool = False         # the device itself says charging is complete
 
 
 class Provider:
